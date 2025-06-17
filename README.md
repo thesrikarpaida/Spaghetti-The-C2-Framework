@@ -12,6 +12,7 @@ This is a C2 framework I built from scratch, that targets Windows machines and i
 ## Deployment: Agent
 
 The Spaghetti_Agent.exe is already a compiled, executable version of the C agent file. It can directly be deployed to the target machine instead of compiling the C file again in case you do not wish to make any changes.
+**Note:** It is currently set to access the server at _`localhost`_, so it would work only if you're testing in your own machine. If you're using a different target machine, I recommend compiling it fresh.
 
 If you want to edit and compile a fresh version of the agent, then:
  - Install CMake.
