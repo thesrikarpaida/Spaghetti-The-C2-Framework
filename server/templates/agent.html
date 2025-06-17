@@ -1,0 +1,116 @@
+{% extends "layout.html" %}
+
+{% block title %}Agent: {{ agent.id }} {% endblock %}
+
+{% block content %}
+
+<div class="row">
+    <a href="/" class="btn">Back to Homepage</a>
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card bg-dark border-secondary">
+            <div class="card-header bg-black text-light border-secondary">
+                Agent Details
+<!--                <span class="badge">{{ agent.status }}</span>-->
+                {% if agent.status == "active" %}
+                <span class="badge bg-success float-end">Active</span>
+                {% else %}
+                <span class="badge bg-danger float-end">Inactive</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <table class="table table-dark table-borderless">
+                    <tr>
+                        <th>Hostname:</th>
+                        <td>{{ agent.hostname }}</td>
+                    </tr>
+                    <tr>
+                        <th>Username:</th>
+                        <td>{{ agent.username }}</td>
+                    </tr>
+                    <tr>
+                        <th>IP Address:</th>
+                        <td>{{ agent.ip_addr }}</td>
+                    </tr>
+                    <tr>
+                        <th>OS:</th>
+                        <td>{{ agent.os_info }}</td>
+                    </tr>
+                    <tr>
+                        <th>Last Seen:</th>
+                        <td>{{ agent.readable_last_seen }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col">
+        <div class="card bg-dark border-secondary">
+            <div class="card-header bg-black text-light border-secondary">
+                Send Command
+            </div>
+            <div class="card-body">
+                <form action="/send_command/{{ agent.id }}" method="post">
+                    <div>
+                        <label for="cmd" class="form-label">Command: </label>
+                        <select name="cmd" id="cmd" class="form-select bg-dark text-light border-secondary">
+                            {% for cmd_key, cmd_value in commands_list.items() %}
+                            <option value="{{ cmd_key }}">{{ cmd_value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-danger">Send this command</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card bg-dark border-secondary">
+            <div class="card-header bg-black text-light border-secondary">
+                Results
+            </div>
+            <div class="card-body">
+                {% if tasks %}
+                <div>
+                    {% for task in tasks %}
+                    <div>
+                        <div>
+                            <span class="fw-bold">{{ task.command }}</span>
+                        </div>
+                        <div>
+<!--                            <span class="badge bg-secondary">{{ task.status }}</span>-->
+                            {% if task.status == "pending" %}
+                            <span class="badge bg-secondary">Pending</span>
+                            {% else %}
+                            <span class="badge bg-success">Completed</span>
+                            {% endif %}
+                        </div>
+                        <div>
+                            <small>{{ task.readable_timestamp }}</small>
+                        </div>
+                        <div>
+                            {{ task.output }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div>
+                    No commands sent to this agent yet...
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
